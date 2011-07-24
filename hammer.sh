@@ -264,7 +264,7 @@ elif [ $1 = "checkout" ] ; then
 
   # Wfmath
   echo "  Wfmath..."
-  checkoutwf "wfmath"
+  checkoutwf "wfmath" "sajty"
   echo "  Done."
 
   # Eris
@@ -274,7 +274,7 @@ elif [ $1 = "checkout" ] ; then
 
   # Libwfut
   echo "  Libwfut..."
-  checkoutwf "libwfut"
+  checkoutwf "libwfut" "sajty" "Branch_mingw_fix"
   echo "  Done."
 
   # Mercator
