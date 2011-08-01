@@ -99,7 +99,7 @@ function buildwf()
 function checkoutwf()
 {
   if [ x"$2" = x"" ]; then
-    USER="worldforge"
+    USER="sajty"
   else
     USER="$2"
   fi
