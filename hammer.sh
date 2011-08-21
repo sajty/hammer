@@ -257,7 +257,7 @@ elif [ $1 = "install-deps" ] ; then
     
     echo "  Downloading..."
     wget -c http://connect.creativelabs.com/openal/Downloads/ALUT/freealut-1.1.0-src.zip
-    tar -xjf freealut-1.1.0-src.zip
+    unzip -o freealut-1.1.0-src.zip
     cd freealut-1.1.0-src
     if [[ $OSTYPE == *darwin* ]] ; then
       wget -c http://sajty.elementfx.com/openal.pc
