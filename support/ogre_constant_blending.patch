@@ -1,0 +1,263 @@
+# HG changeset patch
+# User Peter Szücs <peter.szucs.dev@gmail.com>
+# Date 1386309423 -3600
+#      Fri Dec 06 06:57:03 2013 +0100
+# Branch v1-9
+# Node ID d8c212c3e632d5d133a8e217dd8838fb0b5714e4
+# Parent  eb503efea1d82e41d5ea287f4ff37c3a071fc0b2
+Add constant color scene blending support.
+
+diff -r eb503efea1d8 -r d8c212c3e632 OgreMain/include/OgreBlendMode.h
+--- a/OgreMain/include/OgreBlendMode.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/OgreMain/include/OgreBlendMode.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -242,8 +242,8 @@
+         SBF_DEST_ALPHA,
+         SBF_SOURCE_ALPHA,
+         SBF_ONE_MINUS_DEST_ALPHA,
+-        SBF_ONE_MINUS_SOURCE_ALPHA
+-
++        SBF_ONE_MINUS_SOURCE_ALPHA,
++        SBF_CONSTANT_COLOR
+     };
+ 
+ 	/** Blending operations controls how objects are blended into the scene. The default operation
+diff -r eb503efea1d8 -r d8c212c3e632 OgreMain/include/OgrePass.h
+--- a/OgreMain/include/OgrePass.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/OgreMain/include/OgrePass.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -130,6 +130,9 @@
+ 		/// Determines if we should use separate blending operations for color and alpha channels
+ 		bool mSeparateBlendOperation;
+ 
++		// The constant required for SBF_CONSTANT_COLOR blending mode.
++		ColourValue mSceneBlendConstantColour;
++
+         //-------------------------------------------------------------------------
+ 
+         //-------------------------------------------------------------------------
+@@ -755,6 +758,18 @@
+ 		*/
+ 		void setSeparateSceneBlendingOperation(SceneBlendOperation op, SceneBlendOperation alphaOp);
+ 
++		/** Sets the specific operation used to blend source and destination pixels together.
++			@remarks 
++			By default this operation is +, which creates this equation
++			<span align="center">
++			final = (texture * sourceFactor) + (pixel * destFactor)
++			</span>
++			By setting this to something other than SBO_ADD you can change the operation to achieve
++			a different effect.
++			@param op The blending operation mode to use for this pass
++		*/
++		void setSceneBlendConstantColour(const ColourValue& colour);
++
+ 		/** Returns true if this pass uses separate scene blending operations. */
+ 		bool hasSeparateSceneBlendingOperations() const;
+ 
+@@ -763,6 +778,9 @@
+ 
+ 		/** Returns the current alpha blending operation */
+ 		SceneBlendOperation getSceneBlendingOperationAlpha() const;
++		
++		/** Returns the current blending constant used by SBF_CONSTANT_COLOR */
++		const ColourValue& getSceneBlendConstantColour() const;
+ 
+ 		/** Returns true if this pass has some element of transparency. */
+ 		bool isTransparent(void) const;
+diff -r eb503efea1d8 -r d8c212c3e632 OgreMain/include/OgreRenderSystem.h
+--- a/OgreMain/include/OgreRenderSystem.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/OgreMain/include/OgreRenderSystem.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -845,7 +845,7 @@
+ 		@param destFactor The destination factor in the above calculation, i.e. multiplied by the pixel colour components.
+ 		@param op The blend operation mode for combining pixels
+ 		*/
+-		virtual void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op = SBO_ADD) = 0;
++		virtual void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op = SBO_ADD, const ColourValue& constColour = ColourValue::Black) = 0;
+ 
+ 		/** Sets the global blending factors for combining subsequent renders with the existing frame contents.
+ 		The result of the blending operation is:
+diff -r eb503efea1d8 -r d8c212c3e632 OgreMain/src/OgrePass.cpp
+--- a/OgreMain/src/OgrePass.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/OgreMain/src/OgrePass.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -968,6 +968,14 @@
+ 	{
+ 		return mSeparateBlendOperation;
+ 	}
++	const ColourValue& Pass::getSceneBlendConstantColour() const
++	{
++		return mSceneBlendConstantColour;
++	}
++	void Pass::setSceneBlendConstantColour(const ColourValue& colour)
++	{
++		mSceneBlendConstantColour = colour;
++	}
+     //-----------------------------------------------------------------------
+     bool Pass::isTransparent(void) const
+     {
+diff -r eb503efea1d8 -r d8c212c3e632 OgreMain/src/OgreSceneManager.cpp
+--- a/OgreMain/src/OgreSceneManager.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/OgreMain/src/OgreSceneManager.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -1126,7 +1126,7 @@
+ 			else
+ 			{
+ 				mDestRenderSystem->_setSceneBlending(
+-					pass->getSourceBlendFactor(), pass->getDestBlendFactor(), pass->getSceneBlendingOperation() );
++					pass->getSourceBlendFactor(), pass->getDestBlendFactor(), pass->getSceneBlendingOperation(), pass->getSceneBlendConstantColour() );
+ 			}
+ 		}
+ 
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/Direct3D11/include/OgreD3D11RenderSystem.h
+--- a/RenderSystems/Direct3D11/include/OgreD3D11RenderSystem.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/Direct3D11/include/OgreD3D11RenderSystem.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -307,9 +307,9 @@
+         void _setTextureBorderColour(size_t stage, const ColourValue& colour);
+ 		void _setTextureMipmapBias(size_t unit, float bias);
+ 		void _setTextureMatrix( size_t unit, const Matrix4 &xform );
+-		void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op = SBO_ADD);
++		void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op, const ColourValue& constColour);
+ 		void _setSeparateSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendFactor sourceFactorAlpha, 
+-			SceneBlendFactor destFactorAlpha, SceneBlendOperation op = SBO_ADD, SceneBlendOperation alphaOp = SBO_ADD);
++			SceneBlendFactor destFactorAlpha, SceneBlendOperation op, SceneBlendOperation alphaOp);
+ 		void _setAlphaRejectSettings( CompareFunction func, unsigned char value, bool alphaToCoverage );
+ 		void _setViewport( Viewport *vp );
+ 		void _beginFrame(void);
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/Direct3D11/src/OgreD3D11RenderSystem.cpp
+--- a/RenderSystems/Direct3D11/src/OgreD3D11RenderSystem.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/Direct3D11/src/OgreD3D11RenderSystem.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -1813,8 +1813,9 @@
+ 		}
+ 	}
+ 	//---------------------------------------------------------------------
+-	void D3D11RenderSystem::_setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op /*= SBO_ADD*/ )
++	void D3D11RenderSystem::_setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op /*= SBO_ADD*/, const ColourValue& constColour )
+ 	{
++		OgreAssert(constColour == ColourValue::Black, "The blending option constColour is not supported by this renderSystem!");
+ 		if( sourceFactor == SBF_ONE && destFactor == SBF_ZERO)
+ 		{
+ 			mBlendDesc.RenderTarget[0].BlendEnable = FALSE;
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/Direct3D9/include/OgreD3D9RenderSystem.h
+--- a/RenderSystems/Direct3D9/include/OgreD3D9RenderSystem.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/Direct3D9/include/OgreD3D9RenderSystem.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -275,7 +275,7 @@
+         void _setTextureBorderColour(size_t stage, const ColourValue& colour);
+ 		void _setTextureMipmapBias(size_t unit, float bias);
+ 		void _setTextureMatrix( size_t unit, const Matrix4 &xform );
+-		void _setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op );
++		void _setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op, const ColourValue& constColour);
+ 		void _setSeparateSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendFactor sourceFactorAlpha, SceneBlendFactor destFactorAlpha, SceneBlendOperation op, SceneBlendOperation alphaOp );
+ 		void _setAlphaRejectSettings( CompareFunction func, unsigned char value, bool alphaToCoverage );
+ 		void _setViewport( Viewport *vp );		
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/Direct3D9/src/OgreD3D9RenderSystem.cpp
+--- a/RenderSystems/Direct3D9/src/OgreD3D9RenderSystem.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/Direct3D9/src/OgreD3D9RenderSystem.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -2433,8 +2433,9 @@
+ 		}
+ 	}
+ 	//---------------------------------------------------------------------
+-	void D3D9RenderSystem::_setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op )
++	void D3D9RenderSystem::_setSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op, const ColourValue& constColour )
+ 	{
++		OgreAssert(constColour == ColourValue::Black, "The blending option constColour is not supported by this renderSystem!");
+ 		HRESULT hr;
+ 		if( sourceFactor == SBF_ONE && destFactor == SBF_ZERO)
+ 		{
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/include/OgreGLRenderSystem.h
+--- a/RenderSystems/GL/include/OgreGLRenderSystem.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/include/OgreGLRenderSystem.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -330,7 +330,7 @@
+         /** See
+           RenderSystem
+          */
+-        void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op );
++        void _setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op, const ColourValue& constColour);
+         /** See
+           RenderSystem
+          */
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/include/OgreGLStateCacheManager.h
+--- a/RenderSystems/GL/include/OgreGLStateCacheManager.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/include/OgreGLStateCacheManager.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -202,6 +202,11 @@
+          */
+         void setStencilMask(GLuint mask);
+ 
++		/** Sets the blend constant color for scene blending.
++         @param flag The function to enable.
++         */
++		void setBlendColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
++
+         /** Enables a piece of OpenGL functionality.
+          @param flag The function to enable.
+          */
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/src/OgreGLRenderSystem.cpp
+--- a/RenderSystems/GL/src/OgreGLRenderSystem.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/src/OgreGLRenderSystem.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -1860,12 +1860,14 @@
+ 			return GL_ONE_MINUS_DST_ALPHA;
+ 		case SBF_ONE_MINUS_SOURCE_ALPHA:
+ 			return GL_ONE_MINUS_SRC_ALPHA;
++		case SBF_CONSTANT_COLOR:
++			return GL_CONSTANT_COLOR;
+ 		};
+ 		// to keep compiler happy
+ 		return GL_ONE;
+ 	}
+ 
+-	void GLRenderSystem::_setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op )
++	void GLRenderSystem::_setSceneBlending(SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendOperation op, const ColourValue& constColour )
+ 	{
+ 		GLint sourceBlend = getBlendMode(sourceFactor);
+ 		GLint destBlend = getBlendMode(destFactor);
+@@ -1875,6 +1877,11 @@
+ 		}
+ 		else
+ 		{
++			if(sourceFactor == SBF_CONSTANT_COLOR || destFactor == SBF_CONSTANT_COLOR)
++			{
++				
++				mStateCacheManager->setBlendColor(constColour.r, constColour.g, constColour.b, constColour.a);
++			}
+ 			mStateCacheManager->setEnabled(GL_BLEND);
+ 			mStateCacheManager->setBlendFunc(sourceBlend, destBlend);
+ 		}
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/src/OgreGLStateCacheManager.cpp
+--- a/RenderSystems/GL/src/OgreGLStateCacheManager.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/src/OgreGLStateCacheManager.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -167,6 +167,11 @@
+         mImp->setStencilMask(mask);
+     }
+     
++	void GLStateCacheManager::setBlendColor(GLclampf cRed, GLclampf cGreen, GLclampf cBlue, GLclampf cAlpha)
++	{
++		mImp->setBlendColor(cRed, cGreen, cBlue, cAlpha);
++	}
++
+     void GLStateCacheManager::setEnabled(GLenum flag)
+     {
+         mImp->setEnabled(flag);
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.cpp
+--- a/RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.cpp	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.cpp	Fri Dec 06 06:57:03 2013 +0100
+@@ -212,6 +212,11 @@
+         }
+ 	}
+     
++	void GLStateCacheManagerImp::setBlendColor(GLclampf cRed, GLclampf cGreen, GLclampf cBlue, GLclampf cAlpha)
++	{
++		glBlendColor(cRed, cGreen, cBlue, cAlpha);
++	}
++
+     void GLStateCacheManagerImp::setBlendFunc(GLenum source, GLenum dest)
+     {
+         glBlendFunc(source, dest);
+diff -r eb503efea1d8 -r d8c212c3e632 RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.h
+--- a/RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.h	Tue Dec 03 18:17:17 2013 -0600
++++ b/RenderSystems/GL/src/StateCacheManager/OgreGLNullStateCacheManagerImp.h	Fri Dec 06 06:57:03 2013 +0100
+@@ -123,6 +123,9 @@
+         /// Set the blend equation for RGB and alpha separately.
+         void setBlendEquation(GLenum eqRGB, GLenum eqA);
+ 
++        /// Set the blend constant color for GL_*CONSTANT_* blend modes like GL_CONSTANT_COLOR.
++        void setBlendColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
++
+         /// See GLStateCacheManager.setBlendFunc.
+         void setBlendFunc(GLenum source, GLenum dest);
+ 

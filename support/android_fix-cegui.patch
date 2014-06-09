@@ -1,0 +1,79 @@
+From bfbfbc3435a39327e2bd9a58995bfdaa10545db6 Mon Sep 17 00:00:00 2001
+From: sajty <sajty@sajty-UBI.(none)>
+Date: Tue, 10 Jun 2014 00:01:12 +0200
+Subject: [PATCH] Fix android build.
+
+---
+ CMakeLists.txt                                     |    8 ++++----
+ .../include/CEGUI/RendererModules/Ogre/Renderer.h  |    4 +++-
+ cegui/src/RendererModules/Ogre/CMakeLists.txt      |    2 +-
+ cegui/src/ScriptModules/Lua/CMakeLists.txt         |    2 +-
+ 4 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9da7078..62adf8c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -27,9 +27,9 @@ project(cegui)
+ ################################################################################
+ # Set up version information
+ ################################################################################
+-set( CEGUI_VERSION_MAJOR 9999)
+-set( CEGUI_VERSION_MINOR 0)
+-set( CEGUI_VERSION_PATCH 0)
++set( CEGUI_VERSION_MAJOR 0)
++set( CEGUI_VERSION_MINOR 8)
++set( CEGUI_VERSION_PATCH 3)
+ set( CEGUI_VERSION ${CEGUI_VERSION_MAJOR}.${CEGUI_VERSION_MINOR}.${CEGUI_VERSION_PATCH} )
+ 
+ #
+@@ -471,7 +471,7 @@ configure_file( cegui/include/CEGUI/ModuleConfig.h.in cegui/include/CEGUI/Module
+ configure_file( samples/common/include/CEGUISamplesConfig.h.in samples/common/include/CEGUISamplesConfig.h )
+ configure_file( doc/doxygen/doxyfile.in doc/doxygen/doxyfile )
+ 
+-if (UNIX AND NOT APPLE)
++if (ANDROID OR UNIX AND NOT APPLE)
+     configure_file( cegui/CEGUI.pc.in cegui/CEGUI-${CEGUI_VERSION_MAJOR}.pc @ONLY )
+     install(FILES ${CMAKE_BINARY_DIR}/cegui/CEGUI-${CEGUI_VERSION_MAJOR}.pc DESTINATION ${CEGUI_PKGCONFIG_INSTALL_DIR})
+ 
+diff --git a/cegui/include/CEGUI/RendererModules/Ogre/Renderer.h b/cegui/include/CEGUI/RendererModules/Ogre/Renderer.h
+index a4c08a1..c4c78b0 100644
+--- a/cegui/include/CEGUI/RendererModules/Ogre/Renderer.h
++++ b/cegui/include/CEGUI/RendererModules/Ogre/Renderer.h
+@@ -54,8 +54,10 @@ namespace Ogre
+ class Root;
+ class RenderSystem;
+ class RenderTarget;
+-class TexturePtr;
+ class Matrix4;
++class Texture;
++template<typename T> class SharedPtr;
++typedef Ogre::SharedPtr<Ogre::Texture> TexturePtr;
+ }
+ 
+ // Start of CEGUI namespace section
+diff --git a/cegui/src/RendererModules/Ogre/CMakeLists.txt b/cegui/src/RendererModules/Ogre/CMakeLists.txt
+index 6c710e7..ed4659f 100644
+--- a/cegui/src/RendererModules/Ogre/CMakeLists.txt
++++ b/cegui/src/RendererModules/Ogre/CMakeLists.txt
+@@ -4,5 +4,5 @@ cegui_gather_files()
+ cegui_add_library(${CEGUI_TARGET_NAME} CORE_SOURCE_FILES CORE_HEADER_FILES)
+ cegui_add_dependency(${CEGUI_TARGET_NAME} OGRE)
+ 
+-cegui_target_link_libraries(${CEGUI_TARGET_NAME} ${CEGUI_BASE_LIBNAME})
++cegui_target_link_libraries(${CEGUI_TARGET_NAME} ${CEGUI_BASE_LIBNAME} boost_system boost_thread boost_atomic FreeImage zzip android log)
+ 
+diff --git a/cegui/src/ScriptModules/Lua/CMakeLists.txt b/cegui/src/ScriptModules/Lua/CMakeLists.txt
+index 8dbc19a..940fccb 100644
+--- a/cegui/src/ScriptModules/Lua/CMakeLists.txt
++++ b/cegui/src/ScriptModules/Lua/CMakeLists.txt
+@@ -5,5 +5,5 @@ cegui_add_library(${CEGUI_TARGET_NAME} CORE_SOURCE_FILES CORE_HEADER_FILES)
+ cegui_add_dependency(${CEGUI_TARGET_NAME} TOLUAPP)
+ cegui_add_dependency(${CEGUI_TARGET_NAME} LUA51)
+ 
+-cegui_target_link_libraries(${CEGUI_TARGET_NAME} ${CEGUI_BASE_LIBNAME})
++cegui_target_link_libraries(${CEGUI_TARGET_NAME} ${CEGUI_BASE_LIBNAME} -llua -ltoluapp)
+ 
+-- 
+1.7.9.5
+
