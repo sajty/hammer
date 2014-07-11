@@ -2,11 +2,8 @@
 
 set -e
 
-if [[ x"`uname -o`" != x"GNU/Linux" ]] ; then
-  printf >&2 'Host OS %s is unsupported! Only GNU/Linux is supported!\n' "`uname -o`"
-fi
-if [[ x"`uname -p`" != x"x86_64" ]] ; then
-  printf >&2 'Host architecture %s is unsupported! Only x86_64 is supported!\n' "`uname -p`"
+if [[ x"$HAMMERDIR" = x"" ]] ; then
+  echo "This script should be called through hammer.sh or with a configured environment with setup_env.sh"
 fi
 
 function updateAutotoolsToolchainDetection() {
@@ -30,6 +27,7 @@ function updateAutotoolsToolchainDetection() {
   find $CONFIG_INSTALLDIR -type f -iname 'config.guess' -exec cp -T -f ./config.guess {} \;
   find $CONFIG_INSTALLDIR -type f -iname 'config.sub' -exec cp -T -f ./config.sub {} \;
 }
+
 function getAndroidCMakeToolchain()
 {
   ANDCMAKE_VER="android-cmake"
@@ -44,7 +42,8 @@ function getAndroidCMakeToolchain()
   fi
   return $ANDCMAKE_INSTALLDIR;
 }
-function host_install_deps_toolchain()
+
+function install_deps_toolchain()
 {
   cd $DEPS_SOURCE
 
@@ -55,39 +54,48 @@ function host_install_deps_toolchain()
     
     # The user needs to accept a license, so we inject "y" as input. I'm not sure, whether this is legal.
     echo y | $ANDROID_SDK/tools/android update sdk -u --filter platform-tools,android-15
+    echo y | $ANDROID_SDK/tools/android update sdk -u --filter tools,platform-tools,build-tools-19.1.0
   fi
+  
   
   # Android NDK
   if [ ! -d $ANDROID_NDK ]; then
-    wget -c http://dl.google.com/android/ndk/android-ndk-r9d-linux-x86_64.tar.bz2
-    tar -xjf android-ndk-r9d-linux-x86_64.tar.bz2
+      wget -c http://dl.google.com/android/ndk/android-ndk-r9d-linux-$HOST_ARCH.tar.bz2
+      tar -xjf android-ndk-r9d-linux-$HOST_ARCH.tar.bz2
+      mv android-ndk-r9d android-ndk-r9d-$HOST_ARCH
   fi
-  set +e
+  if [ x"$TARGET_ARCH" = x"x86" ]; then
+    TCNAME=x86
+  else
+    TCNAME=arm-linux-androideabi
+  fi
   # Standalone posix toolchain
   $ANDROID_NDK/build/tools/make-standalone-toolchain.sh --ndk-dir=$ANDROID_NDK --platform=android-15 \
-  --toolchain=arm-linux-androideabi-4.8 --system=linux-x86_64 --stl=gnustl --install-dir=$TOOLCHAIN
-  set -e
-}
-function install_deps_toolchain()
-{
+  --toolchain=$TCNAME-4.8 --system=linux-$HOST_ARCH --stl=gnustl --install-dir=$TOOLCHAIN
+  
   # Create libpthread.a and libz.a dummy, because many libraries are hardcoding -lpthread or -lz, but on Android pthread works out of box.
   touch dummy.c
-  $TOOLCHAIN/bin/arm-linux-androideabi-gcc -o dummy.o -c dummy.c
-  $TOOLCHAIN/bin/arm-linux-androideabi-ar cru $SYSROOT/usr/lib/libpthread.a dummy.o
-  $TOOLCHAIN/bin/arm-linux-androideabi-ranlib $SYSROOT/usr/lib/libpthread.a
-  $TOOLCHAIN/bin/arm-linux-androideabi-ar cru $SYSROOT/usr/lib/libz.a dummy.o
-  $TOOLCHAIN/bin/arm-linux-androideabi-ranlib $SYSROOT/usr/lib/libz.a
+  $TOOLCHAIN/bin/$CROSS_COMPILER-gcc -o dummy.o -c dummy.c
+  $TOOLCHAIN/bin/$CROSS_COMPILER-ar cru $SYSROOT/usr/lib/libpthread.a dummy.o
+  $TOOLCHAIN/bin/$CROSS_COMPILER-ranlib $SYSROOT/usr/lib/libpthread.a
+  $TOOLCHAIN/bin/$CROSS_COMPILER-ar cru $SYSROOT/usr/lib/libz.a dummy.o
+  $TOOLCHAIN/bin/$CROSS_COMPILER-ranlib $SYSROOT/usr/lib/libz.a
   rm dummy.c
   rm dummy.o
   
   # Some dependencies use -lzlib to link zlib.
   cd $SYSROOT/usr/lib
   ln -s -f libz.a libzlib.a
+  
+  #Remove the headers for GLESv1 so that SDL will use GLESv2 only.
+  rm -r $SYSROOT/usr/include/GLES
 }
-function host_install_deps_boost()
+
+
+function install_deps_boost()
 {
   #This function will build bjam with host compiler
-  BOOST_VER=1_55_0
+  BOOST_VER=1_53_0
   BOOST_DIR=boost_$BOOST_VER
   BOOST_BUILDDIR=$DEPS_BUILD/$BOOST_DIR/$BUILDDIR
   BOOST_ANDROID_SOURCEDIR=$DEPS_SOURCE/Boost-for-Android
@@ -102,25 +110,23 @@ function host_install_deps_boost()
   
   cd $BOOST_ANDROID_SOURCEDIR
   mkdir -p $BOOST_ANDROID_SOURCEDIR/logs
-  ./build-android.sh --boost=1.55.0 --toolchain=arm-linux-androideabi-4.8 --download $ANDROID_NDK
+  ./build-android.sh --boost=1.53.0 --toolchain=$CROSS_COMPILER-4.8 --download $ANDROID_NDK
   
-  cd $BOOST_SOURCEDIR
+  # pop cross-compiler and push native compiler environment
+  eval `$SUPPORTDIR/setup_env.sh pop_env`
+  export CROSS_COMPILE=0 && eval `$SUPPORTDIR/setup_env.sh push_env`
   
   #build bjam
+  cd $BOOST_SOURCEDIR
   ./bootstrap.sh
+  
+  # pop native compiler and push back cross-compiler environment
+  eval `$SUPPORTDIR/setup_env.sh pop_env`
+  export CROSS_COMPILE=1 && eval `$SUPPORTDIR/setup_env.sh push_env`
+
   mkdir -p $HOSTTOOLS/bin
-  cp -f --dereference ./bjam $HOSTTOOLS/bin/bjam
-}
-
-function install_deps_boost()
-{
-  # This function will build boost using bjam from host.
-  BOOST_VER=1_55_0
-  BOOST_DIR=boost_$BOOST_VER
-  BOOST_BUILDDIR=$DEPS_BUILD/$BOOST_DIR/$BUILDDIR
-  BOOST_ANDROID_SOURCEDIR=$DEPS_SOURCE/Boost-for-Android
-  BOOST_SOURCEDIR=$BOOST_ANDROID_SOURCEDIR/$BOOST_DIR
-
+  cp -f --dereference $BOOST_SOURCEDIR/bjam $HOSTTOOLS/bin/bjam
+  
   cd $BOOST_ANDROID_SOURCEDIR
   
   # Apply patches to boost
@@ -163,7 +169,7 @@ function install_deps_boost()
   #CXXFLAG="-I$SYSROOT/usr/include -I$PREFIX/include -I$TOOLCHAIN/include/ -I$TOOLCHAIN/include/c++/4.8"
   for flag in $CXXFLAGS; do cxxflags="$cxxflags cxxflags=$flag"; done
   $HOSTTOOLS/bin/bjam -q -a toolset=gcc-androidR8e target-os=linux $cxxflags runtime-link=static link=static threading=multi --layout=system \
-         --with-thread --with-date_time --with-chrono --with-system --prefix=$PREFIX install
+         --with-thread --with-date_time --with-chrono --with-system --with-atomic --prefix=$PREFIX install
 }
 function install_deps_ceguideps()
 {
@@ -180,16 +186,17 @@ function install_deps_ceguideps()
   
   #-static will break the build
   LDFLAGS_SAVE="$LDFLAGS"
-  export LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
+  #export LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
   
   mkdir -p $CEGUIDEPS_BUILDDIR
   cd $CEGUIDEPS_BUILDDIR
   cmake $CMAKE_CROSS_COMPILE $CMAKE_FLAGS -DCEGUI_BUILD_FREEIMAGE=false -DCEGUI_BUILD_FREETYPE2=false \
     -DCEGUI_BUILD_GLEW=false -DCEGUI_BUILD_GLFW=false -DCEGUI_BUILD_GLM=false -DCEGUI_BUILD_SILLY=false \
     -DCEGUI_BUILD_TOLUAPP=true -DCEGUI_BUILD_LUA=true -DCEGUI_BUILD_PCRE=true -DCEGUI_BUILD_EXPAT=true \
-    CMAKE_C_COMPILER="$TOOLCHAIN/arm-linux-androideabi/bin/c++" $CEGUIDEPS_SOURCEDIR
+    -DCMAKE_EXE_LINKER_FLAGS="-static" $CEGUIDEPS_SOURCEDIR
 
-  make $MAKE_FLAGS
+  #It seems that tolua++ and lua are built in parallel, but that will fail. So $MAKE_FLAGS will be ignored
+  make
   #make install
   
   #It seems make install is not installing, so we will copy it manually.
@@ -231,13 +238,13 @@ function install_deps_sdl()
     updateAutotoolsToolchainDetection $SDL_SOURCEDIR
   fi
   
-  
+  echo "CONFIGGGGG: $CONFIGURE_FLAGS"
   #wget -c http://www.libsdl.org/release/$SDL_VER.tar.gz
   #tar -xzf $SDL_VER.tar.gz
   mkdir -p $SDL_BUILDDIR
   cd $SDL_BUILDDIR
-  $SDL_SOURCEDIR/configure $CONFIGURE_FLAGS \
-  --disable-haptic --disable-audio
+  $SDL_SOURCEDIR/configure $CONFIGURE_FLAGS --disable-haptic --disable-audio
+  exit 0
   make $MAKE_FLAGS
   make install
 }
@@ -331,6 +338,11 @@ function install_deps_ogre()
   cd $OGREINCDIR
   OGREINC=-I\${includedir}/OGRE/RenderSystems/$(ls -1 -d */  | tr "\\n" ":" | sed 's=\(.*\)/:=\1=' | sed "s=/:= -I\${includedir}/OGRE/RenderSystems/=g")
   sed -i "s=Cflags:=Cflags: $OGREINC=g" $PREFIX/lib/pkgconfig/OGRE.pc
+  
+  #OGREPLUGINDIR=$PREFIX/lib/OGRE
+  #cd $OGREPLUGINDIR
+  #OGREPLUGIN=-I\${includedir}/OGRE/RenderSystems/$(ls -1 -d */  | tr "\\n" ":" | sed 's=\(.*\)/:=\1=' | sed "s=/:= -I\${includedir}/OGRE/RenderSystems/=g")
+  #sed -i "s=Cflags:=Cflags: $OGREINC=g" $PREFIX/lib/pkgconfig/OGRE.pc
 }
 function install_deps_libiconv()
 {
@@ -343,35 +355,30 @@ function install_deps_libiconv()
   tar -xzf $LIBICONV_VER.tar.gz
   updateAutotoolsToolchainDetection $LIBICONV_SOURCEDIR
   
-  #-static will break the build
-  LDFLAGS_SAVE="$LDFLAGS"
-  LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
   mkdir -p $LIBICONV_BUILDDIR
   cd $LIBICONV_BUILDDIR 
   $LIBICONV_SOURCEDIR/configure $CONFIGURE_FLAGS
-  make  $MAKE_FLAGS
+  make $MAKE_FLAGS
   make install
-  LDFLAGS=$LDFLAGS_SAVE
 }
 
 function install_deps_cegui()
 {
-  CEGUI_VER="cegui"
+  CEGUI_VER="cegui-0.8.4"
   CEGUI_BUILDDIR=$DEPS_BUILD/$CEGUI_VER/$BUILDDIR
   CEGUI_SOURCEDIR=$DEPS_SOURCE/$CEGUI_VER
   
   cd $DEPS_SOURCE
   
   if [ ! -d $CEGUI_SOURCEDIR ]; then
-    git clone https://github.com/ironsteel/cegui.git -b android-port
-    cd $CEGUI_SOURCEDIR
-    git reset --hard 577edcf46b
-    patch -N -p1 -r - < $SUPPORTDIR/android_fix-cegui.patch
+    #git clone https://github.com/ironsteel/cegui.git -b android-port
+    #cd $CEGUI_SOURCEDIR
+    #git reset --hard 577edcf46b
+    
+    wget -c http://downloads.sourceforge.net/sourceforge/crayzedsgui/$CEGUI_VER.tar.bz2
+    tar -xjf $CEGUI_VER.tar.bz2
+    #patch -N -p1 -r - < $SUPPORTDIR/android_fix-cegui.patch
   fi
-
-  #-static will break the build
-  LDFLAGS_SAVE="$LDFLAGS"
-  LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
   
   mkdir -p $CEGUI_BUILDDIR
   cd $CEGUI_BUILDDIR
@@ -379,11 +386,14 @@ function install_deps_cegui()
   cmake $CMAKE_CROSS_COMPILE $CMAKE_FLAGS $CEGUI_SOURCEDIR -DOGRE_LIB=$PREFIX/lib/libOgreMainStatic.a \
   -DCEGUI_BUILD_XMLPARSER_TINYXML=false -DCEGUI_SAMPLES_ENABLED=false -DCEGUI_BUILD_PYTHON_MODULES=false \
   -DBoost_LIBRARY_DIRS=$PREFIX/lib -DCEGUI_BUILD_STATIC_CONFIGURATION=true -DCEGUI_BUILD_LUA_GENERATOR=false \
-  -DOGRE_LIBRARIES=""
+  -DOGRE_LIBRARIES="" -DCMAKE_EXE_LINKER_FLAGS="-static"
   #cmake-gui .
-  make -j1
+  make $MAKE_FLAGS
   make install
-  LDFLAGS=$LDFLAGS_SAVE
+  
+  # Remove installed shared libraries, because the shared build can't be disabled.
+  rm $PREFIX/lib/libCEGUI*so*
+  rm -r $PREFIX/lib/cegui-0.8
 }
 
 function install_deps_openal()
@@ -395,7 +405,6 @@ function install_deps_openal()
   cd $DEPS_SOURCE
   
   if [ ! -d $OPENAL_SOURCEDIR ]; then
-  
     # Android only supports OpenSL.
     # OpenAL-soft is not supporting android, so we need to use a fork.
     git clone https://github.com/apportable/openal-soft.git -b openal-soft-1.15.1-android
@@ -404,17 +413,12 @@ function install_deps_openal()
     patch -N -p1 -r - < $SUPPORTDIR/android_fix-openal.patch
   fi
   
-  #-static will break the build, it seems everyone is using openal as dynamic lib on android, because of lgpl license.
-  LDFLAGS_SAVE="$LDFLAGS"
-  LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
-  
   mkdir -p $OPENAL_BUILDDIR
   cd $OPENAL_BUILDDIR
-  cmake $CMAKE_CROSS_COMPILE $CMAKE_FLAGS $OPENAL_SOURCEDIR
+  cmake $CMAKE_CROSS_COMPILE $CMAKE_FLAGS $OPENAL_SOURCEDIR -DLIBTYPE=STATIC
   make $MAKE_FLAGS
   make install
-  
-  LDFLAGS="$LDFLAGS_SAVE"
+
 }
 
 function install_deps_freealut()
@@ -429,17 +433,18 @@ function install_deps_freealut()
   tar -xzf freealut-1.1.0.tar.gz
   updateAutotoolsToolchainDetection $FREEALUT_SOURCEDIR
 
-  #-static will break the build.
-  LDFLAGS_SAVE="$LDFLAGS"
-  LDFLAGS=$(echo $LDFLAGS | sed "s/ -static / /g")
-  
   mkdir -p $FREEALUT_BUILDDIR
   cd $FREEALUT_BUILDDIR
+
+  eval `$SUPPORTDIR/setup_env.sh push_cur`
+  export LIBS="$LIBS -lopenal -llog"
+  
+  
   $FREEALUT_SOURCEDIR/configure $CONFIGURE_FLAGS
   make $MAKE_FLAGS
   make install
-
-  LDFLAGS="$LDFLAGS_SAVE"
+  
+  eval `$SUPPORTDIR/setup_env.sh pop_env`
 }
 
 function install_deps_libcurl()
@@ -464,12 +469,6 @@ function install_deps_libcurl()
 
 }
 
-function host_install_deps_all()
-{
-  host_install_deps_toolchain
-  host_install_deps_boost
-}
-
 function install_deps_all()
 {
   install_deps_toolchain
@@ -485,114 +484,6 @@ function install_deps_all()
   install_deps_ogre
   install_deps_cegui
 }
-
-if [[ x"$HAMMERDIR" == x"" ]] ; then
-  $HAMMERDIR="$PWD"
-fi
-
-# Set up hammer directory structure
-export WORKDIR=$HAMMERDIR/work/android
-export PREFIX=$WORKDIR/local
-export TOOLCHAIN=$WORKDIR/toolchain
-export DEPS_SOURCE=$WORKDIR/source
-export DEPS_BUILD=$WORKDIR/build
-export BUILDDIR=host
-export SUPPORTDIR=$HAMMERDIR/support
-export LOGDIR=$WORKDIR/logs
-export HOSTTOOLS=$WORKDIR/host_tools
-
-# Setup directories
-mkdir -p $PREFIX
-mkdir -p $DEPS_SOURCE
-mkdir -p $DEPS_BUILD
-mkdir -p $LOGDIR
-mkdir -p $HOSTTOOLS/bin
-
-# These are used by cmake to identify android kits
-export ANDROID_SDK=$DEPS_SOURCE/android-sdk-linux
-export ANDROID_NDK=$DEPS_SOURCE/android-ndk-r9d
-export ANDROID_STANDALONE_TOOLCHAIN=$TOOLCHAIN
-export NDK_TOOLCHAIN_VERSION=4.8
-
-# Build tools with host compiler. Not all package requires tools.
-if [ "$1" = "all" ] || [ "$1" = "toolchain" ] || [ "$1" = "boost" ] ; then
-  echo Compiling $1 host tools
-  host_install_deps_$1
-  echo Succeed compiling $1 host tools
-fi
-
-# These are used by autoconfig for cross-compiling
-export CROSS_COMPILER=arm-linux-androideabi
-export SYSROOT=$TOOLCHAIN/sysroot
-export CONFIGURE_CROSS_COMPILE="--host=${CROSS_COMPILER} --prefix=${PREFIX}"
-
-# Set android toolchain to the beginning of PATH, so that any call to "gcc" or "g++" will end up into android toolchain.
-export PATH=$TOOLCHAIN/bin:$TOOLCHAIN/arm-linux-androideabi/bin:$ANDROID_SDK/platform-tools:$ANDROID_SDK/tools:$ANDROID_NDK:$HOSTTOOLS/bin:$PATH
-
-# Set up prefix path properly
-export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
-export ACLOCAL_ARGS="$ACLOCAL_ARGS -I $PREFIX/share/aclocal"
-export CONFIGURE_FLAGS="$CONFIGURE_CROSS_COMPILE --enable-static --disable-dynamic --disable-rpath"
-export BUILDDIR=android
-
-# Set up compiler/linker
-# Optimization flags
-export CFLAGS="-g -Os -fno-omit-frame-pointer"
-# Select ARM instruction set and min VFP version. softfp ABI means that it will not use 
-# VFP registers through ABI calls (softfp and hardfp has incompatible ABI and can't be linked together).
-export CFLAGS="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp -mthumb $CFLAGS"
-#Disable warning spam from boost
-export CFLAGS="-Wno-unused-local-typedefs -Wno-unused-variable"
-# The aliasing and pic is required, while inline-limit speeds up builds.
-export CFLAGS="-fno-strict-aliasing -fpic -finline-limit=64 $CFLAGS"
-# Macros that should be set to detect android/arm.
-export CFLAGS="-D__ANDROID__ -DANDROID -D__arm__ $CFLAGS"
-# Required for threading.
-export CFLAGS="-D_GLIBCXX__PTHREADS -D_REENTRANT $CFLAGS"
-# Required for boost
-export CFLGAS="-D__GLIBC__"
-# Required if not compiling through toolchain.
-export CFLAGS="--sysroot=$SYSROOT $CFLAGS"
-# Includes
-export CFLAGS="-I$TOOLCHAIN/include/c++/4.8/arm-linux-androideabi/armv7-a/thumb $CFLAGS"
-
-export CPATH="$TOOLCHAIN/include/c++/4.8/arm-linux-androideabi/armv7-a/thumb"
-export CPATH="$CPATH:$TOOLCHAIN/include/c++/4.8"
-export CPATH="$CPATH:$SYSROOT/usr/include"
-export CPATH="$CPATH:$PREFIX/include"
-
-# Transform CPATH into -I... compiler flags
-INCFLAGS=-I$(echo $CPATH | sed "s/:/ -I/g")
-export CFLAGS="$CFLAGS $INCFLAGS"
-
-export CPPFLAGS="$CFLAGS"
-export CXXFLAGS="$CFLAGS -frtti -fexceptions"
-export LDFLAGS="-march=armv7-a -Wl,--fix-cortex-a8 -Wl,--no-undefined"
-
-#Tell libtool to only link static libs.
-export LDFLAGS="$LDFLAGS -static"
-
-export LIBRARY_PATH="$TOOLCHAIN/arm-linux-androideabi/lib/armv7-a/thumb"
-export LIBRARY_PATH="$LIBRARY_PATH:$TOOLCHAIN/lib/gcc/arm-linux-androideabi/4.8/armv7-a/thumb"
-export LIBRARY_PATH="$LIBRARY_PATH:$SYSROOT/usr/lib"
-export LIBRARY_PATH="$LIBRARY_PATH:$PREFIX/lib"
-export LD_LIBRARY_PATH="$LIBRARY_PATH"
-
-# Transform LIBRARY_PATH into -L... linker flags
-LIBFLAGS=-L$(echo $LIBRARY_PATH | sed "s/:/ -L/g")
-export LDFLAGS="$LDFLAGS $LIBFLAGS"
-
-echo "LDFLAGS=$LDFLAGS"
-echo "CFLAGS=$CFLAGS"
-
-# Get common ancestor prefix, so that system paths like /usr/lib will be ignored by cmake
-export CMAKE_ROOT_PATH=`printf "%s\n%s\n" "$PREFIX" "$TOOLCHAIN" | sed -e 'N;s/^\(.*\).*\n\1.*$/\1/'`
-
-# Set up cmake flags required for cross-compiling
-export CMAKE_CROSS_COMPILE="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_C_COMPILER=$TOOLCHAIN/arm-linux-androideabi/bin/gcc \
-  -DCMAKE_FIND_ROOT_PATH=$CMAKE_ROOT_PATH -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-  -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_MAKE_PROGRAM=make -DANDROID=true -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY -DCMAKE_INSTALL_PREFIX=$PREFIX"
-#export CMAKE_CROSS_COMPILE="-DCMAKE_TOOLCHAIN_FILE=$(getAndroidCMakeToolchain) -DCMAKE_FIND_ROOT_PATH=$CMAKE_ROOT_PATH -DCMAKE_INSTALL_PREFIX=$PREFIX"
 
 #TODO: Set up logs, but for now it is easier to debug without logs.
 if [ "$1" = "all" ] || [ "$1" = "toolchain" ] || [ "$1" = "sigc++" ] || [ "$1" = "openal" ] || [ "$1" = "freealut" ] || [ "$1" = "libcurl" ] || [ "$1" = "libiconv" ] || 

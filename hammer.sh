@@ -17,7 +17,9 @@ function show_help()
     echo "  release_ember  -  change ember to a specific release"
     echo ""
     echo "Options:"
+    echo "  debug          -  Build for debuging instead of max performance"
     echo "  cross-compile  -  Compile to different platform: --cross_compile=android"
+    echo "                    Can be android (=ARMv7), android-ARMv7 or android-x86"
     echo "  make_flags     -  Variable passed to every make call: --make_flags=\"-j4\""
     echo "  configure_flags-  Variable passed to every configure call"
     echo "  cmake_flags    -  Variable passed to every cmake call"
@@ -91,15 +93,40 @@ if [ $# -eq 0 ] ; then
   show_help "main"
 fi
 
+for envvar in CROSS_COMPILE DEBUG_BUILD MAKE_FLAGS CONFIGURE_FLAGS CMAKE_FLAGS COMPILE_FLAGS LINK_FLAGS FORCE_AUTOGEN FORCE_CONFIGURE TARGET_ARCH TARGET_OS HOST_ARCH HOST_OS HAMMERDIR WORKDIR SUPPORTDIR
+do
+  if [ -n "${!envvar+x}" ] ; then
+    echo "Warning: Environment variable '$envvar' is set, but it will be ignored!"
+  fi
+done
+
+
 #default flags, which can be changed with hammer.sh flags
-export CROSS_COMPILE=""
+#Change these for custom builds.
+export CROSS_COMPILE=0 # Can be 0 (native build) or 1 (cross build).
+export DEBUG_BUILD=0 # Can be 0 (release build) or 1 (debug build). Only used if COMPILE_FLAGS is empty!
+
 export MAKE_FLAGS="-j3"
-export CONFIGURE_FLAGS="--verbose"
+export CONFIGURE_FLAGS=""
 export CMAKE_FLAGS=""
 export COMPILE_FLAGS=""
 export LINK_FLAGS=""
-export FORCE_AUTOGEN=0
-export FORCE_CONFIGURE=0
+export FORCE_AUTOGEN=0 # Can be 0 or 1.
+export FORCE_CONFIGURE=0 # Can be 0 or 1.
+
+# NOTE: These are only valid if CROSS_COMPILE=1
+export TARGET_ARCH="ARMv7" # Can be ARMv7 or x86. (ARMv6, ARMv8, ARM_NEON, MIPS may be added later)
+export TARGET_OS="android" # Can be android.
+export HOST_ARCH="`uname -p`" # Can be x86_64 or x86.
+if [[ $HOST_ARCH = i[3456]86 ]] ; then
+  export HOST_ARCH=x86
+fi
+export HOST_OS="`uname -o`" # Can be GNU/Linux.
+
+# Directory hierarchy base
+export HAMMERDIR=$PWD # It should contain hammer.sh file only.
+export WORKDIR=$HAMMERDIR/work # It should contain anything generated.
+export SUPPORTDIR=$HAMMERDIR/support # It should contain any other script.
 
 while :
 do
@@ -113,7 +140,22 @@ do
       exit 0
       ;;
     -t=* | --cross_compile=* | --cross-compile=*) # --cross-compile=android
-      export CROSS_COMPILE=${1#*=}
+      export CROSS_COMPILE=1
+      TARGET_NAME=${1#*=}
+      if [ "$TARGET_NAME" = "android" ] || [ "$TARGET_NAME" = "android-ARMv7" ]; then
+        export TARGET_OS="android"
+        export TARGET_ARCH="ARMv7"
+      elif [ "$TARGET_NAME" = "android-x86" ]; then
+        export TARGET_OS="android"
+        export TARGET_ARCH="x86"
+      else
+        echo "Unknown target '$TARGET_NAME'!"
+        exit 1
+      fi
+      shift
+      ;;
+    --debug)
+      export DEBUG=1
       shift
       ;;
     --make_flags=* | --make-flags=*) # --make_flags="-j4"
@@ -154,12 +196,19 @@ do
   esac
 done
 
+#+++++++++++++++++++++
+#+ Setup environment +
+#+++++++++++++++++++++
+# It will use the settings from above to set up the environment.
+# You can use pop_env to get back to system environment.
+#$SUPPORTDIR/setup_env.sh push_env #Use this to debug setup_env.sh
+eval `$SUPPORTDIR/setup_env.sh push_env`
 
-
+echo "Building for $BUILDDIR!"
 
 # Define component versions
-CEGUI_VER=cegui-0.8.3
-CEGUI_DOWNLOAD=cegui-0.8.3.tar.gz
+CEGUI_VER=cegui-0.8.4
+CEGUI_DOWNLOAD=cegui-0.8.4.tar.bz2
 OGRE_VER=ogre_1_9_0
 OGRE_DOWNLOAD=v1-9-0.tar.bz2
 CG_VER=3.1
@@ -175,39 +224,12 @@ ERIS_VER=1.3.23
 WFUT_VER=libwfut-0.2.3
 MERCATOR_VER=0.3.3
 
-export HAMMERDIR=$PWD
-export WORKDIR=$HAMMERDIR/work
-export PREFIX=$WORKDIR/local
-export SOURCE=$WORKDIR/source/worldforge
-export DEPS_SOURCE=$WORKDIR/source/deps
-export BUILD=$WORKDIR/build/worldforge
-export DEPS_BUILD=$WORKDIR/build/deps
-export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:$PREFIX/lib64/pkgconfig:$PKG_CONFIG_PATH
-export BUILDDIR=`getconf LONG_BIT`
-export SUPPORTDIR=$HAMMERDIR/support
-#needed to find tolua++ program if installed in prefix
-export PATH="$PATH:$PREFIX/bin"
-export CPATH="$PREFIX/include:$CPATH"
-export LIBRARY_PATH="$PREFIX/lib:$LIBRARY_PATH"
-export LD_LIBRARY_PATH="$PREFIX/lib:$LD_LIBRARY_PATH"
-
-export CFLAGS="$CFLAGS $COMPILE_FLAGS"
-export CXXFLAGS="$CXXFLAGS $COMPILE_FLAGS"
-export CPPFLAGS="$CPPFLAGS $COMPILE_FLAGS"
-export LDFLAGS="$LDFLAGS -L$PREFIX/lib $LINK_FLAGS"
-export CONFIGURE_FLAGS="$CONFIGURE_FLAGS --prefix=$PREFIX"
-# This is set so CEGUI can find its dependencies in the local prefix
-export CMAKE_PREFIX_PATH=$PREFIX
-
 # setup directories
 mkdir -p $PREFIX
 mkdir -p $DEPS_SOURCE
 mkdir -p $SOURCE
 mkdir -p $DEPS_BUILD
 mkdir -p $BUILD
-
-# Log Directory
-LOGDIR=$WORKDIR/logs
 mkdir -p $LOGDIR
 
 # Output redirect logs
@@ -215,128 +237,6 @@ AUTOLOG=autogen.log     # Autogen output
 CONFIGLOG=config.log    # Configure output
 MAKELOG=build.log       # Make output
 INSTALLLOG=install.log  # Install output
-
-if [[ x$CROSS_COMPILE = x"android" ]] ; then
-  export BUILDDIR="android"
-  if [[ x"`uname -o`" != x"GNU/Linux" ]] ; then
-    printf >&2 'Host OS %s is unsupported! Only GNU/Linux is supported!\n' "`uname -o`"
-  fi
-  if [[ x"`uname -p`" != x"x86_64" ]] ; then
-    printf >&2 'Host architecture %s is unsupported! Only x86_64 is supported!\n' "`uname -p`"
-  fi
-  if [[ $1 != "install-deps" ]] ; then
-
-  # Set up hammer directory structure
-  export WORKDIR=$HAMMERDIR/work/android
-  export PREFIX=$WORKDIR/local
-  export TOOLCHAIN=$WORKDIR/toolchain
-  export DEPS_SOURCE=$WORKDIR/source
-  export DEPS_BUILD=$WORKDIR/build
-  export BUILDDIR=android
-  export SUPPORTDIR=$HAMMERDIR/support
-  export LOGDIR=$WORKDIR/logs
-  export HOSTTOOLS=$WORKDIR/host_tools
-
-  # Setup directories
-  mkdir -p $PREFIX
-  mkdir -p $DEPS_SOURCE
-  mkdir -p $DEPS_BUILD
-  mkdir -p $LOGDIR
-  mkdir -p $HOSTTOOLS/bin
-
-  # These are used by cmake to identify android kits
-  export ANDROID_SDK=$DEPS_SOURCE/sdk
-  export ANDROID_NDK=$DEPS_SOURCE/android-ndk-r9d
-  export ANDROID_STANDALONE_TOOLCHAIN=$TOOLCHAIN
-
-  # These are used by autoconfig for cross-compiling
-
-
-  # These are used by autoconfig for cross-compiling
-  export CROSS_COMPILER=arm-linux-androideabi
-  export SYSROOT=$TOOLCHAIN/sysroot
-  export CONFIGURE_CROSS_COMPILE="--host=${CROSS_COMPILER} --prefix=${PREFIX}"
-
-  # Set android toolchain to the beginning of PATH, so that any call to "gcc" or "g++" will end up into android toolchain.
-  export PATH=$TOOLCHAIN/bin:$TOOLCHAIN/arm-linux-androideabi/bin:$ANDROID_SDK/platform-tools:$ANDROID_SDK/tools:$ANDROID_NDK:$HOSTTOOLS/bin:$PATH
-
-  # Set up prefix path properly
-  export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
-  export ACLOCAL_ARGS="$ACLOCAL_ARGS -I $PREFIX/share/aclocal"
-  export CONFIGURE_FLAGS="$CONFIGURE_CROSS_COMPILE --enable-static --disable-shared --disable-rpath"
-  export BUILDDIR=android
-
-  # Set up compiler/linker
-  # Optimization flags
-  export CFLAGS="-g -Os -fno-omit-frame-pointer"
-  # Select ARM instruction set and min VFP version. softfp ABI means that it will not use 
-  # VFP registers through ABI calls (softfp and hardfp has incompatible ABI and can't be linked together).
-  export CFLAGS="-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=softfp -mthumb $CFLAGS"
-  #Disable warning spam from boost
-  export CFLAGS="-Wno-unused-local-typedefs -Wno-unused-variable"
-  # The aliasing and pic is required, while inline-limit speeds up builds.
-  export CFLAGS="-fno-strict-aliasing -fpic -finline-limit=64 $CFLAGS"
-  # Macros that should be set to detect android/arm.
-  export CFLAGS="-D__ANDROID__ -DANDROID -D__arm__ $CFLAGS"
-  # Required for threading.
-  export CFLAGS="-D_GLIBCXX__PTHREADS -D_REENTRANT $CFLAGS"
-  # Required for C99 functions for C++11 standard with gnustl runtime.
-  #export CFLAGS="_GLIBCXX_USE_C99_MATH_TR1 $CFLAGS"
-  # Required if not compiling through toolchain.
-  export CFLAGS=" $CFLAGS"
-  # Includes
-  export CFLAGS="-I$TOOLCHAIN/include/c++/4.8/arm-linux-androideabi/armv7-a/thumb $CFLAGS"
-
-  export CPATH="$TOOLCHAIN/include/c++/4.8/arm-linux-androideabi/armv7-a/thumb"
-  export CPATH="$CPATH:$TOOLCHAIN/include/c++/4.8"
-  export CPATH="$CPATH:$SYSROOT/usr/include"
-  export CPATH="$CPATH:$PREFIX/include"
-
-  # Transform CPATH into -I... compiler flags
-  INCFLAGS=-I$(echo $CPATH | sed "s/:/ -I/g")
-  export CFLAGS="$CFLAGS $INCFLAGS"
-
-  export CPPFLAGS="$CFLAGS"
-  export CXXFLAGS="$CFLAGS -frtti -fexceptions"
-  export LDFLAGS="-march=armv7-a -Wl,--fix-cortex-a8 -Wl,--no-undefined"
-
-  export LIBRARY_PATH="$TOOLCHAIN/arm-linux-androideabi/lib/armv7-a/thumb:$TOOLCHAIN/lib/gcc/arm-linux-androideabi/4.8/armv7-a/thumb:$SYSROOT/usr/lib:$PREFIX/lib"
-  export LD_LIBRARY_PATH="$LIBRARY_PATH"
-
-  # Transform LIBRARY_PATH into -L... linker flags
-  LIBFLAGS=-L$(echo $LIBRARY_PATH | sed "s/:/ -L/g")
-  export LDFLAGS="$LDFLAGS $LIBFLAGS"
-
-  export LIBS="-lboost_thread -lboost_system -lboost_atomic"
-
-  echo "LDFLAGS=$LDFLAGS"
-  echo "CFLAGS=$CFLAGS"
-
-fi
-
-elif [[ $OSTYPE == *darwin* ]] ; then
-  #the default architecture is universal build: i864;x86_64
-  #To save space and time, we will only build x86_64
-  export CMAKE_FLAGS="$CMAKE_FLAGS -GXcode -DCMAKE_OSX_ARCHITECTURES=x86_64"
-
-  #on mac libtool is called glibtool.
-  #Automake should set this, but it has messed up the order of variable definitions.
-  export MAKE_FLAGS="$MAKE_FLAGS LIBTOOL=glibtool"
-
-  export CXXFLAGS="-O2 -g -DTOLUA_EXPORT -DCEGUI_STATIC -I$PREFIX/include -I/opt/local/include $CXXFLAGS"
-  export CFLAGS="-O2 -g -DTOLUA_EXPORT -DCEGUI_STATIC -I$PREFIX/include -I/opt/local/include $CFLAGS"
-  export LDFLAGS="$LDFLAGS -L$PREFIX/lib -L/opt/local/lib"
-
-  #without CPATH cegui is not finding freeimage.
-  export CPATH="/opt/local/include:$CPATH"
-
-elif [[ x$MSYSTEM = x"MINGW32" && $1 != "install-deps" ]] ; then
-  export CONFIGURE_FLAGS="$CONFIGURE_FLAGS --enable-shared --disable-static"
-  export CXXFLAGS="-O2 -msse2 -mthreads -DBOOST_THREAD_USE_LIB -DCEGUILUA_EXPORTS $CXXFLAGS"
-  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:/usr/local/lib/pkgconfig:/mingw/lib/pkgconfig:/lib/pkgconfig:$PKG_CONFIG_PATH"
-  #for msys/mingw we need to specify the include directory
-  export CXXFLAGS="-I$PREFIX/include $CXXFLAGS"
-fi
 
 function buildwf()
 {
@@ -406,6 +306,7 @@ function cyphesis_post_install()
 
 function install_deps_cg()
 {
+    # TODO: This seems broken. Missing beginning of function.
     # Cg Toolkit
     echo "  Installing Cg Toolkit..."
     if [[ $OSTYPE == *darwin* ]] ; then
@@ -570,7 +471,7 @@ function install_deps_cegui()
     if [ ! -d $CEGUI_VER ] ; then
       echo "  Downloading..."
       curl -C - -OL http://downloads.sourceforge.net/sourceforge/crayzedsgui/$CEGUI_DOWNLOAD
-      tar -xzf $CEGUI_DOWNLOAD
+      tar -xjf $CEGUI_DOWNLOAD
       if [[ $OSTYPE == *darwin* ]] ; then
         echo "  Patching..."
         cd $DEPS_SOURCE/$CEGUI_VER
@@ -588,7 +489,7 @@ function install_deps_cegui()
     make install > $LOGDIR/deps/CEGUI/$INSTALLLOG
     if [[ $OSTYPE == *darwin* ]] ; then
       #on mac we use -DCEGUI_STATIC, which will disable the plugin interface and we need to link the libraries manually.
-      sed -i "" -e "s/-lCEGUIBase/-lCEGUIBase -lCEGUIFalagardWRBase -lCEGUIFreeImageImageCodec -lCEGUITinyXMLParser/g" $PREFIX/lib/pkgconfig/CEGUI.pc
+      sed -i "" -e "s/-lCEGUIBase/-lCEfrGUIBase -lCEGUIFalagardWRBase -lCEGUIFreeImageImageCodec -lCEGUITinyXMLParser/g" $PREFIX/lib/pkgconfig/CEGUI.pc
     fi
     echo "  Done."
 }
@@ -601,6 +502,7 @@ function install_deps_all()
     install_deps_ogre
     install_deps_cegui
 }
+
 function ember_fetch_media()
 {
   if [ $1 = "dev" ] ; then
@@ -636,11 +538,11 @@ mkdir -p $PREFIX $SOURCE $DEPS_SOURCE $BUILD $DEPS_BUILD
 # Dependencies install
 if [ "$1" = "install-deps" ] ; then
   if [ x$MSYSTEM = x"MINGW32" ] ; then
-    $HAMMERDIR/support/mingw_install_deps.sh $2
+    $SUPPORTDIR/mingw_install_deps.sh $2
     exit 0
   fi
-  if [[ x$CROSS_COMPILE = x"android" ]] ; then
-    $HAMMERDIR/support/android_install_deps.sh $2
+  if [ "$CROSS_COMPILE" = "1" ] && [[ x"$TARGET_OS" = x"android" ]] ; then
+    $SUPPORTDIR/android_install_deps.sh $2
     exit 0
   fi
   if [ $# -ne 2 ] ; then
