@@ -335,12 +335,12 @@ elif [ "$TARGET_OS" = "native" ] && [[ $OSTYPE == *darwin* ]] ; then
 
   #without CPATH cegui is not finding freeimage.
   pexport CPATH="/opt/local/include:$CPATH"
-elif [ "$TARGET_OS" = "native" ] && [[ x$MSYSTEM = x"MINGW32" && $1 != "install-deps" ]] ; then
-  pexport CONFIGURE_FLAGS="$CONFIGURE_FLAGS --enable-shared --disable-static"
-  pexport CXXFLAGS="-O2 -msse2 -mthreads -DBOOST_THREAD_USE_LIB -DCEGUILUA_EXPORTS $CXXFLAGS"
-  pexport PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:/usr/local/lib/pkgconfig:/mingw/lib/pkgconfig:/lib/pkgconfig:$PKG_CONFIG_PATH"
+elif [ "$TARGET_OS" = "native" ] && [[ $MSYSTEM = *MINGW* ]] ; then
+  #pexport CONFIGURE_FLAGS="$CONFIGURE_FLAGS --enable-shared --disable-static"
+  #pexport CXXFLAGS="-O2 -msse2 -mthreads -DBOOST_THREAD_USE_LIB -DCEGUILUA_EXPORTS $CXXFLAGS"
+  #pexport PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:/usr/local/lib/pkgconfig:/mingw/lib/pkgconfig:/lib/pkgconfig:$PKG_CONFIG_PATH"
   #for msys/mingw we need to specify the include directory
-  pexport CXXFLAGS="-I$PREFIX/include $CXXFLAGS"
+  #pexport CXXFLAGS="-I$PREFIX/include $CXXFLAGS"
 #else
   # TODO: Show error and quit if target is unsupported
 fi

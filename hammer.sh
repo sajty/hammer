@@ -655,7 +655,7 @@ mkdir -p "$PREFIX" "$SOURCE" "$DEPS_SOURCE" "$BUILD" "$DEPS_BUILD"
 
 # Dependencies install
 if [ x"$1" = x"install-deps" ] ; then
-  if [ x"$MSYSTEM" = x"MINGW32" ] ; then
+  if [[ $MSYSTEM = *MINGW* ]] ; then
     "$SUPPORTDIR/mingw_install_deps.sh" "$2"
     exit 0
   fi
@@ -772,7 +772,7 @@ elif [ "$1" = "checkout" ] ; then
   fi
 
   if [ "$2" = "webember" ] || [ "$2" = "all" ] ; then
-    if [[ x$MSYSTEM != x"MINGW32" ]] ; then
+    if [[ $MSYSTEM != *MINGW* ]] ; then
       echo "  FireBreath..."
       mkdir -p "$SOURCE/clients/webember"
       cd "$SOURCE/clients/webember"
@@ -893,7 +893,7 @@ elif [ "$1" = "build" ] ; then
 
     # WebEmber
     echo "  WebEmber plugin..."
-    if [[ x$MSYSTEM = x"MINGW32" ]] ; then
+    if [[ $MSYSTEM = *MINGW* ]] ; then
       # Firebreath is not supporting mingw32 yet, we will use msvc prebuilt for webember.
       mkdir -p "$BUILD/clients/ember/$BUILDDIR"
       cd "$BUILD/clients/ember/$BUILDDIR"
