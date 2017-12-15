@@ -126,6 +126,10 @@ export HAMMERDIR=$PWD # It should contain hammer.sh file only.
 export WORKDIR=$HAMMERDIR/work # It should contain anything generated.
 export SUPPORTDIR=$HAMMERDIR/support # It should contain any other script.
 
+# Currently, we only support Microsoft Visual Studio 2017 Community edition (free for non-commercial use).
+# If you want to try another compiler, then please be aware that you may need to recompile all dependencies too.
+export MSVISUALSTUDIO_EXECUTABLE="c:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\Common7\\IDE\\devenv.exe"
+export MSVISUALSTUDIO_CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
 
 EMBER_VER="master"
 WEBEMBER_VER="master"
@@ -291,6 +295,25 @@ function buildwfautotools()
     make install > "$LOGDIR/$PRJNAME/$INSTALLLOG"
 }
 
+function cmake_build_and_install()
+{
+    if  [[ $OSTYPE == *darwin* ]] ; then
+      echo "  Building..."
+      xcodebuild -configuration RelWithDebInfo > "$1/$MAKELOG"
+      echo "  Installing..."
+      xcodebuild -configuration RelWithDebInfo -target install > "$1/$INSTALLLOG"
+    elif [[ $MSYSTEM = *MINGW* ]] ; then
+      echo "  Building..."
+      "$MSVISUALSTUDIO_EXECUTABLE" *.sln -build "Release" -out "$1/$MAKELOG"
+      echo "  Installing..."
+      "$MSVISUALSTUDIO_EXECUTABLE" *.sln -build "Release" -project "INSTALL" -out "$1/$INSTALLLOG"
+    else
+      echo "  Building..."
+      make $MAKE_FLAGS > "$1/$MAKELOG"
+      echo "  Installing..."
+      make install > "$1/$INSTALLLOG"
+    fi
+}
 
 function buildwf()
 {
@@ -311,20 +334,11 @@ function buildwf()
     mkdir -p "$BUILD/$1/$BUILDDIR"
     cd "$BUILD/$1/$BUILDDIR"
     echo "  Configuring..."
-    cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" $CMAKE_FLAGS "$SOURCE/$1" > "$LOGDIR/$PRJNAME/$CONFIGLOG"
+    # The MSVISUALSTUDIO_CMAKE_GENERATOR inside CMAKE_FLAGS contains spaces and it can only be passed correctly with eval.
+    # see: http://fvue.nl/wiki/Bash:_Why_use_eval_with_variable_expansion%3F
+    eval cmake $CMAKE_FLAGS -DCMAKE_INSTALL_PREFIX="$PREFIX" "$SOURCE/$1" > "$LOGDIR/$PRJNAME/$CONFIGLOG"
     
-    if  [[ $OSTYPE == *darwin* ]] ; then
-      echo "  Building..."
-      xcodebuild -configuration RelWithDebInfo > "$LOGDIR/$PRJNAME/$MAKELOG"
-      echo "  Installing..."
-      xcodebuild -configuration RelWithDebInfo -target install > "$LOGDIR/$PRJNAME/$INSTALLLOG"
-    else
-      echo "  Building..."
-      make $MAKE_FLAGS > "$LOGDIR/$PRJNAME/$MAKELOG"
-      echo "  Installing..."
-      make install > "$LOGDIR/$PRJNAME/$INSTALLLOG"
-    fi
-    
+    cmake_build_and_install "$LOGDIR/$PRJNAME"
 }
 
 function checkoutwf()

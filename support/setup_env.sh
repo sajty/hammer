@@ -336,6 +336,10 @@ elif [ "$TARGET_OS" = "native" ] && [[ $OSTYPE == *darwin* ]] ; then
   #without CPATH cegui is not finding freeimage.
   pexport CPATH="/opt/local/include:$CPATH"
 elif [ "$TARGET_OS" = "native" ] && [[ $MSYSTEM = *MINGW* ]] ; then
+  
+  # TODO: Add \" character support to escapeString(), so that we can use pexport instead.
+  echo 'export CMAKE_FLAGS="\"-G$MSVISUALSTUDIO_CMAKE_GENERATOR\" $CMAKE_FLAGS"'
+  
   #pexport CONFIGURE_FLAGS="$CONFIGURE_FLAGS --enable-shared --disable-static"
   #pexport CXXFLAGS="-O2 -msse2 -mthreads -DBOOST_THREAD_USE_LIB -DCEGUILUA_EXPORTS $CXXFLAGS"
   #pexport PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:/usr/local/lib/pkgconfig:/mingw/lib/pkgconfig:/lib/pkgconfig:$PKG_CONFIG_PATH"
