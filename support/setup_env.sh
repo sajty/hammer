@@ -340,6 +340,8 @@ elif [ "$TARGET_OS" = "native" ] && [[ $MSYSTEM = *MINGW* ]] ; then
   # TODO: Add \" character support to escapeString(), so that we can use pexport instead.
   echo 'export CMAKE_FLAGS="\"-G$MSVISUALSTUDIO_CMAKE_GENERATOR\" $CMAKE_FLAGS"'
   
+  
+  pexport CXXFLAGS="-D_WIN32_WINNT=0x0601 $CXXFLAGS" # = Windows 7
   #pexport CONFIGURE_FLAGS="$CONFIGURE_FLAGS --enable-shared --disable-static"
   #pexport CXXFLAGS="-O2 -msse2 -mthreads -DBOOST_THREAD_USE_LIB -DCEGUILUA_EXPORTS $CXXFLAGS"
   #pexport PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:/usr/local/lib/pkgconfig:/mingw/lib/pkgconfig:/lib/pkgconfig:$PKG_CONFIG_PATH"

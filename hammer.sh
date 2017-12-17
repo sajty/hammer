@@ -304,8 +304,10 @@ function cmake_build_and_install()
       xcodebuild -configuration RelWithDebInfo -target install > "$1/$INSTALLLOG"
     elif [[ $MSYSTEM = *MINGW* ]] ; then
       echo "  Building..."
+      rm -f "$1/$MAKELOG"
       "$MSVISUALSTUDIO_EXECUTABLE" *.sln -build "Release" -out "$1/$MAKELOG"
       echo "  Installing..."
+      rm -f "$1/$INSTALLLOG"
       "$MSVISUALSTUDIO_EXECUTABLE" *.sln -build "Release" -project "INSTALL" -out "$1/$INSTALLLOG"
     else
       echo "  Building..."
@@ -334,6 +336,7 @@ function buildwf()
     mkdir -p "$BUILD/$1/$BUILDDIR"
     cd "$BUILD/$1/$BUILDDIR"
     echo "  Configuring..."
+
     # The MSVISUALSTUDIO_CMAKE_GENERATOR inside CMAKE_FLAGS contains spaces and it can only be passed correctly with eval.
     # see: http://fvue.nl/wiki/Bash:_Why_use_eval_with_variable_expansion%3F
     eval cmake $CMAKE_FLAGS -DCMAKE_INSTALL_PREFIX="$PREFIX" "$SOURCE/$1" > "$LOGDIR/$PRJNAME/$CONFIGLOG"
@@ -416,26 +419,12 @@ function install_deps_ogre()
     echo "  Configuring..."
     OGRE_EXTRA_FLAGS=""
     
-    cmake "$OGRE_SOURCE" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DOGRE_BUILD_SAMPLES="FALSE" -DOGRE_NODE_STORAGE_LEGACY="FALSE" -DOGRE_RESOURCEMANAGER_STRICT=true \
+    eval cmake "$OGRE_SOURCE" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DOGRE_BUILD_SAMPLES="FALSE" -DOGRE_NODE_STORAGE_LEGACY="FALSE" -DOGRE_RESOURCEMANAGER_STRICT=true \
     -DOGRE_INSTALL_SAMPLES="FALSE" -DOGRE_INSTALL_DOCS="FALSE" -DOGRE_BUILD_TOOLS="FALSE" -DOGRE_BUILD_PLUGIN_PCZ="FALSE" -DOGRE_BUILD_DEPENDENCIES=false \
     -DOGRE_BUILD_PLUGIN_BSP="FALSE" -DOGRE_BUILD_COMPONENT_PYTHON="FALSE" -DOGRE_BUILD_COMPONENT_BITES="FALSE" \
     -DOGRE_BUILD_COMPONENT_PROPERTY="FALSE" -DOGRE_BUILD_COMPONENT_VOLUME="FALSE" -DOGRE_BUILD_COMPONENT_JAVA="FALSE" $OGRE_EXTRA_FLAGS $CMAKE_FLAGS > "$LOGDIR/deps/ogre/$CONFIGLOG"
-    if [[ $OSTYPE == *darwin* ]] ; then
-        echo "  Building..."
-        xcodebuild -configuration RelWithDebInfo #> "$LOGDIR/deps/ogre/$MAKELOG"
-        echo "  Installing..."
-        xcodebuild -configuration RelWithDebInfo -target install #> "$LOGDIR/deps/ogre/$INSTALLLOG"
-        #cp -r lib/macosx/RelWithDebInfo/* "$PREFIX/lib"
-        #on mac, we have only Ogre.framework
-        #sed -i "" -e "s/-L\$[{]libdir[}]\ -lOgreMain/-F\${libdir} -framework Ogre/g" "$PREFIX/lib/pkgconfig/OGRE.pc"
-        echo "  Done."
-    else
-        echo "  Building..."
-        make $MAKE_FLAGS > "$LOGDIR/deps/ogre/$MAKELOG"
-        echo "  Installing..."
-        make install > "$LOGDIR/deps/ogre/$INSTALLLOG"
-        echo "  Done."
-    fi
+    
+	cmake_build_and_install "$LOGDIR/deps/ogre"
 }
 
 function install_deps_freealut()
@@ -572,23 +561,10 @@ function install_deps_cegui()
 	  export CXXFLAGS="$CXXFLAGS -I$PREFIX/include/OGRE -DCEGUI_OGRE_VERSION=67840" # Ogre 1.9.0
 	  export LDFLAGS="$LDFLAGS -F$PREFIX/lib/RelWithDebInfo -L$PREFIX/lib/RelWithDebInfo -framework Ogre"
     fi
-    cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" -C "${SUPPORTDIR}/CEGUI_defaults.cmake" $CMAKE_FLAGS "$DEPS_SOURCE/$CEGUI_VER"  > "$LOGDIR/deps/CEGUI/$CONFIGLOG"
-		
-    if [[ $OSTYPE == *darwin* ]] ; then
-      echo "  Building..."
-      xcodebuild -configuration RelWithDebInfo #> "$LOGDIR/deps/CEGUI/$MAKELOG"
-      echo "  Installing..."
-      xcodebuild -configuration RelWithDebInfo -target install > "$LOGDIR/deps/CEGUI/$INSTALLLOG"
-      #on mac we use -DCEGUI_STATIC, which will disable the plugin interface and we need to link the libraries manually.
-      #sed -i "" -e "s/-lCEGUIBase/-lCEGUIBase -lCEGUIFalagardWRBase -lCEGUIFreeImageImageCodec -lCEGUITinyXMLParser/g" "$PREFIX/lib/pkgconfig/CEGUI.pc"
-	  echo "  Done."
-    else
-      echo "  Building..."
-      make $MAKE_FLAGS > "$LOGDIR/deps/CEGUI/$MAKELOG"
-      echo "  Installing..."
-      make install > "$LOGDIR/deps/CEGUI/$INSTALLLOG"
-      echo "  Done."
-    fi
+    
+    eval cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" -C "${SUPPORTDIR}/CEGUI_defaults.cmake" $CMAKE_FLAGS "$DEPS_SOURCE/$CEGUI_VER"  > "$LOGDIR/deps/CEGUI/$CONFIGLOG"
+    
+    cmake_build_and_install "$LOGDIR/deps/CEGUI"
 }
 function install_deps_all()
 {
@@ -598,11 +574,13 @@ function install_deps_all()
     fi
     install_deps_ogre
     install_deps_cegui
-    install_deps_basedir
+    if [[ ! $OSTYPE == *darwin* ]] && [[ ! $MSYSTEM == *MINGW* ]] ; then
+      install_deps_basedir
+    fi
 }
 function install_deps_AppImageKit()
 {
-  # AppImageKit
+    # AppImageKit
     echo "  Installing core AppImageKit functionality..."
     mkdir -p "$LOGDIR/deps/AppImageKit"    # create AppImageKit log directory
     cd "$DEPS_SOURCE"
@@ -669,10 +647,6 @@ mkdir -p "$PREFIX" "$SOURCE" "$DEPS_SOURCE" "$BUILD" "$DEPS_BUILD"
 
 # Dependencies install
 if [ x"$1" = x"install-deps" ] ; then
-  if [[ $MSYSTEM = *MINGW* ]] ; then
-    "$SUPPORTDIR/mingw_install_deps.sh" "$2"
-    exit 0
-  fi
   if [[ x"$TARGET_OS" = x"android" ]] ; then
     "$SUPPORTDIR/android_install_deps.sh" "$2"
     exit 0
